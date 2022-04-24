@@ -12,11 +12,15 @@ import logging as log
 from datetime import datetime
 import pandas as pd
 
+# import Azure Storage libraries
+from azure.storage.blob import BlobServiceClient, ContentSettings
+
 # get working directory
 base_dir = os.getcwd()
 
 # define tag name constants
 site = "DemoSite"
+
 
 def process_data_task(eqmt_ip: str, json_data: dict):
     """Process data tasks"""
@@ -37,15 +41,33 @@ def process_data_task(eqmt_ip: str, json_data: dict):
 
     # transform json data to CSV
     log.info(f"--- Starting data transformation for '{json_filename}'...")
-    transform_data(file_datetime, json_data, file_datetime_ts)
+    transformed_filename, transformed_data = transform_data(eqmt_ip, file_datetime, json_data, file_datetime_ts)
     log.info(f"--- Data transformation complete for '{json_filename}'.")
+
+    # upload data to azure
+    has_json_uploaded, has_csvgz_uploaded = upload_data_to_azure(json_filename, json_data, transformed_filename, transformed_data)
+
+    if not has_json_uploaded:
+        # generate json path for failed uploads
+        json_file_path_failed = f"{base_dir}\\data\\failed_upload\\raw\\{json_filename}"
+        with open(json_file_path_failed, "w") as jsonfile:
+            json.dump(json_data, jsonfile)
+
+    if not has_csvgz_uploaded:
+        # generate csv path for failed uploads
+        csv_file_path_failed = f"{base_dir}\\data\\failed_upload\\processed\\{transformed_filename}"
+        transform_data.to_csv(
+            csv_file_path_failed,
+            compression="gzip",
+            index=False,
+        )
 
     # log background tasks completed
     log.info(f"--- Background task completed 'process_data_task'.")
 
 
 def transform_data(eqmt_ip, file_datetime, json_body, file_datetime_ts):
-    """Transform JSON data to columnar CSV"""
+    """Transform JSON data to CSV"""
 
     # create the first row with the current timestamp and device serial number
     row = [
@@ -120,4 +142,47 @@ def transform_data(eqmt_ip, file_datetime, json_body, file_datetime_ts):
         index=False,
     )
 
+    return transformed_filename, df
 
+
+def upload_data_to_azure(json_filename, json_data, transformed_filename, transformed_data):
+    """Upload to Azure Blob Storage"""
+
+    # set upload flags to False
+    has_json_uploaded = False
+    has_csvgz_uploaded = False
+
+    # get connection string from .env file
+    connect_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+
+    # create a blob client using the local file name as the name for the blob
+    blob_service_client = BlobServiceClient.from_connection_string(connect_str)
+
+    # define blob container and paths
+    blob_client_json = blob_service_client.get_blob_client(container="device-data", blob=f"raw/{json_filename}")
+    blob_client_csvgz = blob_service_client.get_blob_client(container="device-data", blob=f"processed/{transformed_filename}")
+
+    # upload raw JSON file
+    try:
+        json_content_setting = ContentSettings(content_type="application/json")
+        blob_client_json.upload_blob(json.dumps(json_data, ensure_ascii=False).encode("utf-8"), overwrite=True, content_settings=json_content_setting)
+        has_json_uploaded = True
+        log.info(f"--- JSON file uploaded to Azure: '{json_filename}'.")
+    except:
+        log.error(f"*** JSON file NOT uploaded to Azure: '{json_filename}'.")
+
+    # upload processed compressed CSV file
+    try:
+        csvgz_content_setting = ContentSettings(content_type="application/x-gzip")
+
+        # TODO: Investigate directly uploading transformed_data data frame
+        # read compressed CSV file from disk
+        with open(f"{base_dir}/data/processed/{transformed_filename}", "rb") as data:
+            blob_client_csvgz.upload_blob(data, overwrite=True, content_settings=csvgz_content_setting)
+
+        has_csvgz_uploaded = True
+        log.info(f"--- Transformed file uploaded to Azure: '{transformed_filename}'.")
+    except:
+        log.error(f"*** Transformed file NOT uploaded to Azure: '{transformed_filename}'.")
+
+    return has_json_uploaded, has_csvgz_uploaded
