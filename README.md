@@ -8,8 +8,8 @@ In these series of blogs I will be covering building an ETL data pipeline using 
 - [Part 2. Scaling up the web server with FastAPI](https://h3xagn.com/building-an-etl-pipeline-from-device-to-cloud-part-2/)
 - [Part 3. Creating the ELT module as a background worker](https://h3xagn.com/building-an-etl-pipeline-from-device-to-cloud-part-3/)
 - [Part 4. Moving data to the Azure Blob storage](https://h3xagn.com/building-an-etl-pipeline-from-device-to-cloud-part-4/) **(you are here)**
-- Part 5. Creating a function app to send data to the vendor
-- Part 6. Ingesting data into Azure Data Explorer
+- [Part 5. Creating a function app to send data to the vendor](https://h3xagn.com/building-an-etl-pipeline-from-device-to-cloud-part-5/)
+- [Part 6. Ingesting data into Azure Data Explorer](https://h3xagn.com/building-an-etl-pipeline-from-device-to-cloud-part-6/)
 
 ## Tags
 
