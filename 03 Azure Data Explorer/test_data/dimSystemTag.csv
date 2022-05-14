@@ -1,0 +1,6 @@
+﻿System,Tag,EngUnit,Min,Max
+OilMon,DvcSrlNmbr,,,
+OilMon,EISIntrrgtnsSncLstRst,s,0,
+OilMon,FlwRt,m3/s,0,2
+OilMon,OlRltvHmdty,%,0,100
+OilMon,OlTmp,deg C,0,200

@@ -1,0 +1,51 @@
+﻿// query data in raw table
+// test_data/raw_oil_data.csv
+raw_oil_data
+
+// total records 102
+// specifically added some bad data:
+// - first three records are duplicated
+// - third record contains an empty TagName
+// - fourth record is below zero (-1.25)
+// - fifth record is above 10 000 (10 254)
+
+// this query used in the continuous export to generate factOilData
+raw_oil_data
+//adding summarize query before parse to handle potential duplicate data
+| summarize arg_max(TimeStamp, *) by TimeStamp, TagName
+| project-away TimeStamp1
+//adding range check - between is inclusive at both limits
+| where Value between (0..10000)
+//adding check to ensure TagName is not empty
+| where isnotempty(TagName) 
+| parse TagName with Site: string '.' System: string '.' EqmtIp: string '.' Tag: string 
+
+// our factOilData now has 97 records (5 bad data records removed)
+// we also parsed the TagName to generate keys Site, System, EqmtIp and Tag
+
+// lets look at our dimention tables
+// test_data/dimSiteEqmt.csv
+dimSiteEqmt
+// 56 records
+
+// test_data/dimSystemTag.csv
+dimSystemTag
+// 5 records
+
+// lets create our factOilData table as a variable
+// note that it is only available within this query
+let factOilData = 
+    raw_oil_data
+    | summarize arg_max(TimeStamp, *) by TimeStamp, TagName
+    | project-away TimeStamp1
+    | where Value between (0..10000)
+    | where isnotempty(TagName) 
+    | parse TagName with Site: string '.' System: string '.' EqmtIp: string '.' Tag: string;
+// join our two dimension tables using lookup and their keys
+// lookup is similar to join, however it is optimised for larger fact tables joining smaller dimenstion tables
+factOilData
+| lookup kind=leftouter dimSiteEqmt on Site, EqmtIp
+| lookup kind=leftouter dimSystemTag on System, Tag
+
+// we get our expected 97 good quality records
+// as well as our six additional columns from our two dimension tables

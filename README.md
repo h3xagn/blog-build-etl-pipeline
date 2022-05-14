@@ -37,9 +37,11 @@ Ensure all other Application Settings are updated in the Azure Portal for the fu
 
 ### 03 Azure Data Explorer
 
-This folder contains the Azure Data Explorer commands to setup ADX for our data and export it to the Data Lake.
+This folder contains the Azure Data Explorer commands to setup ADX as well as the queries to test our data model that will be exported to the Data Lake.
 
 - `kusto-commands.kql`: Contains all the commands to setup tables, exports and continuous exports.
+- `kusto-data-model-queries.kql`: Contains the queries to test data quality rules and joins with dimension tables.
+- `test_data`: Contains three test CSV files to test the data model.
 
 Note that for the `factOilData`, the data quality checks are built into the continuous export query. The quality check implemented are:
 
