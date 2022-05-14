@@ -3,6 +3,7 @@
 raw_oil_data
 
 // total records 102
+// note on the live data we will limit the query above as there are millions of rows
 // specifically added some bad data:
 // - first three records are duplicated
 // - third record contains an empty TagName
@@ -23,7 +24,7 @@ raw_oil_data
 // our factOilData now has 97 records (5 bad data records removed)
 // we also parsed the TagName to generate keys Site, System, EqmtIp and Tag
 
-// lets look at our dimention tables
+// lets look at our dimension tables
 // test_data/dimSiteEqmt.csv
 dimSiteEqmt
 // 56 records
@@ -42,7 +43,7 @@ let factOilData =
     | where isnotempty(TagName) 
     | parse TagName with Site: string '.' System: string '.' EqmtIp: string '.' Tag: string;
 // join our two dimension tables using lookup and their keys
-// lookup is similar to join, however it is optimised for larger fact tables joining smaller dimenstion tables
+// lookup is similar to join, however it is optimised for larger fact tables joining smaller dimension tables
 factOilData
 | lookup kind=leftouter dimSiteEqmt on Site, EqmtIp
 | lookup kind=leftouter dimSystemTag on System, Tag
