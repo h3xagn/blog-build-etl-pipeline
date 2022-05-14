@@ -9,7 +9,9 @@ JSON File Uploader: Utils module for Background Tasks
 import os
 import json
 import logging as log
-from datetime import datetime
+from datetime import date, datetime
+import gzip
+from typing import Tuple
 import pandas as pd
 
 # import Azure Storage libraries
@@ -22,8 +24,16 @@ base_dir = os.getcwd()
 site = "DemoSite"
 
 
-def process_data_task(eqmt_ip: str, json_data: dict):
-    """Process data tasks"""
+def process_data_task(eqmt_ip: str, json_data: dict) -> None:
+    """Process data tasks
+
+    Args:
+        eqmt_ip (str): IP address of the equipment from the POST request.
+        json_data (dict): JSON data file from the POST request as a dictionary.
+
+    Returns:
+        None.
+    """
 
     # get current time
     file_time = datetime.now()
@@ -31,21 +41,28 @@ def process_data_task(eqmt_ip: str, json_data: dict):
     file_datetime_ts = file_time.strftime("%Y-%m-%d %H:%M:%S.%f")
 
     # generate json filename and path
-    json_filename = f'data_{json_data["sn"]}_{file_datetime}.json'
-    json_file_path = f"{base_dir}\\data\\raw\\{json_filename}"
+    json_filename = f'data_{json_data["sn"]}_{file_datetime}.json.gz'
+    json_file_path = f'{base_dir}\\data\\raw\\{json_data["sn"]}\\{file_time.year}\\{file_time.month}\\{file_time.day}'
 
-    # save json file to disk
-    with open(json_file_path, "w") as jsonfile:
-        json.dump(json_data, jsonfile)
+    # create json_file_path if it does not exist
+    if not os.path.exists(json_file_path):
+        os.makedirs(json_file_path)
+
+    # OLD: save json file to disk
+    # with open(json_file_path, "w") as jsonfile:
+    #     json.dump(json_data, jsonfile)
+    # NEW: save compressed json file to disk
+    with gzip.open(f"{json_file_path}/{json_filename}", "w") as file_zip:
+        file_zip.write(json.dumps(json_data).encode("utf-8"))
     log.info(f"--- Raw JSON data file saved: '{json_filename}'.")
 
     # transform json data to CSV
     log.info(f"--- Starting data transformation for '{json_filename}'...")
-    transformed_filename, transformed_data = transform_data(eqmt_ip, file_datetime, json_data, file_datetime_ts)
+    transformed_filename, transformed_data = transform_data(eqmt_ip, file_datetime, json_data, file_datetime_ts, file_time)
     log.info(f"--- Data transformation complete for '{json_filename}'.")
 
     # upload data to azure
-    has_json_uploaded, has_csvgz_uploaded = upload_data_to_azure(json_filename, json_data, transformed_filename, transformed_data)
+    has_json_uploaded, has_csvgz_uploaded = upload_data_to_azure(json_filename, json_data, transformed_filename, transformed_data, file_time)
 
     if not has_json_uploaded:
         # generate json path for failed uploads
@@ -66,9 +83,19 @@ def process_data_task(eqmt_ip: str, json_data: dict):
     log.info(f"--- Background task completed 'process_data_task'.")
 
 
-def transform_data(eqmt_ip, file_datetime, json_body, file_datetime_ts):
-    """Transform JSON data to CSV"""
+def transform_data(eqmt_ip: str, file_datetime: str, json_body: dict, file_datetime_ts: str, file_time: datetime) -> Tuple[str, pd.DataFrame]:
+    """Transform JSON data to CSV
 
+    Args:
+        eqmt_ip (str): IP address of the equipment from the POST request.
+        file_datetime (str): Datetime string for the filename.
+        json_body (dict): JSON data file from the POST request as a dictionary.
+        file_datetime_ts (str): Datetime string to use for the timestamp in the dataframe.
+        file_time (datetime): The datatime the file was received.
+
+    Returns:
+        Tuple[str, pd.DataFrame]: Returns transformed filename and the dataframe.
+    """
     # create the first row with the current timestamp and device serial number
     row = [
         {
@@ -134,10 +161,15 @@ def transform_data(eqmt_ip, file_datetime, json_body, file_datetime_ts):
 
     # create filename for processed data
     transformed_filename = f'data_{site}_{eqmt_ip.replace(".", "_")}._{json_body["sn"]}_{file_datetime}.csv.gz'
+    transformed_path = f'{base_dir}\\data\\processed\\{json_body["sn"]}\\{file_time.year}\\{file_time.month}\\{file_time.day}'
+
+    # create path if it does not exist
+    if not os.path.exists(transformed_path):
+        os.makedirs(transformed_path)
 
     # save to compressed CSV file
     df.to_csv(
-        f"{base_dir}/data/processed/{transformed_filename}",
+        f"{transformed_path}\\{transformed_filename}",
         compression="gzip",
         index=False,
     )
@@ -145,8 +177,19 @@ def transform_data(eqmt_ip, file_datetime, json_body, file_datetime_ts):
     return transformed_filename, df
 
 
-def upload_data_to_azure(json_filename, json_data, transformed_filename, transformed_data):
-    """Upload to Azure Blob Storage"""
+def upload_data_to_azure(json_filename: str, json_data: dict, transformed_filename: str, transformed_data: pd.DataFrame, file_time: datetime) -> Tuple[bool, bool]:
+    """Upload to Azure Blob Storage
+
+    Args:
+        json_filename (str): JSON data assigned filename.
+        json_data (dict): JSON data file from the POST request as a dictionary.
+        transformed_filename (str): Transformed data assigend filename.
+        transformed_data (pd.DataFrame): Pandas dataframe containing the transformed data.
+        file_time (datetime): The datatime the file was received.
+
+    Returns:
+        Tuple[bool, bool]: Returns the two boolean values to confirm file uploads.
+    """
 
     # set upload flags to False
     has_json_uploaded = False
@@ -159,13 +202,13 @@ def upload_data_to_azure(json_filename, json_data, transformed_filename, transfo
     blob_service_client = BlobServiceClient.from_connection_string(connect_str)
 
     # define blob container and paths
-    blob_client_json = blob_service_client.get_blob_client(container="device-data", blob=f"raw/{json_filename}")
-    blob_client_csvgz = blob_service_client.get_blob_client(container="device-data", blob=f"processed/{transformed_filename}")
+    blob_client_json = blob_service_client.get_blob_client(container="device-data", blob=f'raw/{json_data["sn"]}/{file_time.year}/{file_time.month}/{file_time.day}/{json_filename}')
+    blob_client_csvgz = blob_service_client.get_blob_client(container="device-data", blob=f'processed/{json_data["sn"]}/{file_time.year}/{file_time.month}/{file_time.day}/{transformed_filename}')
 
-    # upload raw JSON file
+    # upload raw compressed JSON file
     try:
         json_content_setting = ContentSettings(content_type="application/json")
-        blob_client_json.upload_blob(json.dumps(json_data, ensure_ascii=False).encode("utf-8"), overwrite=True, content_settings=json_content_setting)
+        blob_client_json.upload_blob(gzip.compress(json.dumps(json_data).encode("utf-8")), overwrite=True, content_settings=json_content_setting)
         has_json_uploaded = True
         log.info(f"--- JSON file uploaded to Azure: '{json_filename}'.")
     except:
@@ -175,10 +218,13 @@ def upload_data_to_azure(json_filename, json_data, transformed_filename, transfo
     try:
         csvgz_content_setting = ContentSettings(content_type="application/x-gzip")
 
-        # TODO: Investigate directly uploading transformed_data data frame
-        # read compressed CSV file from disk
-        with open(f"{base_dir}/data/processed/{transformed_filename}", "rb") as data:
-            blob_client_csvgz.upload_blob(data, overwrite=True, content_settings=csvgz_content_setting)
+        # OLD: read compressed CSV file from disk
+        #  with open(f'{base_dir}\\data\\processed\\{json_data["sn"]}\\{file_time.year}\\{file_time.month}\\{file_time.day}\\{transformed_filename}', "rb") as data:
+        #     blob_client_csvgz.upload_blob(data, overwrite=True, content_settings=csvgz_content_setting)
+
+        # NEW: method to load the data frame in memory to blob
+        # encode data frame and then compress it
+        blob_client_csvgz.upload_blob(gzip.compress(transformed_data.encode("utf-8")), overwrite=True, content_settings=csvgz_content_setting)
 
         has_csvgz_uploaded = True
         log.info(f"--- Transformed file uploaded to Azure: '{transformed_filename}'.")

@@ -1,26 +1,37 @@
 """
 JSON File Uploader
 
-1. Receive JSON file from field device over HTTPS
-2. Save raw JSON file to local file system, ./data/raw
+1. Receive JSON file from field device over HTTPS.
+2. Start background task for each request to:
+    2.1. Save raw JSON file to local file system.
+    2.2. Transform JSON file to CSV column format and save to local file system.
+    2.3. Load compressed raw (JSON) and transformed (CSV) files to Azure Blob Storage.
+    2.4. If upload to Azure Blob Storage fails, save file to local file system for manual upload.
 """
 # import libraries
 import os
-from datetime import datetime
 import logging as log
-import json
 
 # import web server libraries
 from fastapi import FastAPI, Request, Response, BackgroundTasks
 from starlette.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+import asyncio
+import selectors
 
 # import custom modules
 from utils import process_json
 
+# running async workers
+selector = selectors.SelectSelector()
+loop = asyncio.SelectorEventLoop(selector)
+asyncio.set_event_loop(loop)
+
+# get the current working directory
 base_dir = os.getcwd()
 
+# setup logging
 log.basicConfig(
     filename="web_server.log",
     level=log.DEBUG,
@@ -32,8 +43,10 @@ origins = [
     "*",
 ]
 
+# create instance of FastAPI
 app = FastAPI()
 
+# add middleware configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -42,6 +55,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# define a default html page
 html = """
 <!DOCTYPE html>
 <html>
@@ -60,10 +74,19 @@ async def get():
     """Home"""
     return HTMLResponse(html)
 
+
 # data upload post
 @app.post("/upload/data")
-async def upload_data_from_device(data_request: Request, background_tasks: BackgroundTasks):
-    """Upload data from field devices"""
+async def upload_data_from_device(data_request: Request, background_tasks: BackgroundTasks) -> Response:
+    """Upload data from field devices
+
+    Args:
+        data_request (Request): Data that comes with the POST request.
+        background_tasks (BackgroundTasks): For creation of background tasks.
+
+    Returns:
+        (Response): Returns status code to the device: either 200 if successfull or 500 if there is an error.
+    """
     # get device ip address
     eqmt_ip = data_request.client[0]
     log.info(f"--- New POST received from EqmtIP '{eqmt_ip}'.")
@@ -83,9 +106,11 @@ async def upload_data_from_device(data_request: Request, background_tasks: Backg
     return Response(content=None, status_code=200)
 
 
+# define the entry point and uvicorn server details
+# need to have 'debug=True' when running on Windows
 if __name__ == "__main__":
     uvicorn.run(
-        "fastapi-json:app",
+        "main:app",
         host="127.0.0.1",
         port=8443,
         log_level="info",
@@ -94,4 +119,3 @@ if __name__ == "__main__":
         workers=4,
         debug=True,
     )
-

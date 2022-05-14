@@ -1,0 +1,10 @@
+{
+    "scriptFile": "main.py",
+    "bindings": [{
+        "name": "blobin",
+        "type": "blobTrigger",
+        "direction": "in",
+        "path": "device-data/raw/{name}.json.gz",
+        "connection": "sah3xagn_STORAGE"
+    }]
+}

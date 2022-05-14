@@ -1,0 +1,57 @@
+﻿// Setting up our Bid Data Platform in ADX
+// This files contains the kusto commands to setup ADX
+// ---------------------------------------------------------------------------------------
+
+// create dimension table the Site and Equipment
+.create table meta_site_eqmt (Site: string, EqmtIp: string, ProductType: string, EqmtId: string, Active: bool)
+
+// create dimension table the System and Tag
+.create table meta_system_tag (System: string, Tag: string, EngUnit: string, Min: int, Max: int)
+
+// create link to external table for exporting: factOilData
+.create external table factOilData (TimeStamp: datetime, TagName: string, Value: real, Site: string, System: string, EqmtIp: string, Tag: string) 
+    kind=blob 
+    partition by (HH: datetime = bin(TimeStamp, 1h))
+    pathformat = ("demosite/oil/" datetime_pattern("yyyy\'/\'MM\'/\'dd\'/\'HH", TimeStamp))
+    dataformat=parquet 
+    ( 
+    h@'https://<name>.blob.core.windows.net/dfcuploads;StorageAccountKey'
+    )
+
+// create link to external table for exporting: dimSiteEqmt
+.create external table dimSiteEqmt (Site: string, EqmtIp: string, ProductType: string, EqmtId: string, Active: bool) 
+    kind=blob 
+    dataformat=parquet 
+    ( 
+    h@'https://<name>.blob.core.windows.net/dfcuploads;StorageAccountKey'
+    )
+
+// create link to external table for exporting: dimSystemTag
+.create external table dimSystemTag (System: string, Tag: string, EngUnit: string, Min: int, Max: int) 
+    kind=blob 
+    dataformat=parquet 
+    ( 
+    h@'https://<name>.blob.core.windows.net/dfcuploads;StorageAccountKey'
+    )
+
+// one time export of dimension tables
+.export async to table dimSiteEqmt <|
+    meta_site_eqmt 
+
+.export async to table dimSystemTag <|
+    meta_system_tag 
+
+// continuous export of data
+.create-or-alter continuous-export ParquetExport over (raw_oil_data) to table factOilData
+    with
+    (intervalBetweenRuns=1h, sizeLimit=104857600)
+    <|
+    raw_oil_data
+    //adding summarize query before parse to handle potential duplicate data
+    | summarize arg_max(TimeStamp, *) by TimeStamp, TagName
+    | project-away TimeStamp1
+    //adding range check - between is inclusive at both limits
+    | where Value between (0..10000)
+    //adding check to ensure TagName is not empty
+    | where isnotempty(TagName) 
+    | parse TagName with Site: string '.' System: string '.' EqmtIp: string '.' Tag: string 
